@@ -19,7 +19,7 @@ variable "cloudwatch" {
 
 variable "s3bucket" {
   type    = string
-  default = "cis-benchmark-trail-bucket"
+  default = "codepipeline-cloudtrail-placeholder-bucket-ap-southeast-1"
 }
 
 variable "iam_role" {
@@ -64,34 +64,8 @@ resource "aws_cloudtrail" "cis_benchmark_trail" {
   enable_log_file_validation    = true
   cloud_watch_logs_group_arn    = aws_cloudwatch_log_group.cis_benchmark_log_group.arn
   cloud_watch_logs_role_arn     = aws_iam_role.cis_benchmark_role.arn
-  s3_bucket_name                = aws_s3_bucket.cis_benchmark_bucket.id
+  s3_bucket_name                = data.aws_s3_bucket.existing_s3_bucket.id
   include_global_service_events = true
-}
-
-resource "aws_s3_bucket" "cis_benchmark_bucket" {
-  count  = length(data.aws_s3_bucket.existing_s3_bucket.id) == 0 ? 1 : 0
-  bucket = "${var.s3bucket}-${random_id.bucket_suffix.hex}"
-
-  versioning {
-    enabled = true
-  }
-
-  lifecycle_rule {
-    enabled = true
-
-    transition {
-      days          = 30
-      storage_class = "GLACIER"
-    }
-
-    expiration {
-      days = 365
-    }
-  }
-}
-
-resource "random_id" "bucket_suffix" {
-  byte_length = 4
 }
 
 # IAM Role for CloudTrail to write logs to CloudWatch
@@ -141,25 +115,87 @@ resource "aws_cloudwatch_log_group" "cis_benchmark_log_group" {
 
 # CloudWatch Metric Filters and Alarms
 locals {
-  metric_filters = {
-    "UnauthorizedAPICalls" = {
+  cis_benchmark_metrics = {
+    # [AWS CIS] 3.1 - Ensure a log metric filter and alarm exist for unauthorized API calls
+    UnauthorizedAPICalls = {
       pattern   = "{($.errorCode=\"*UnauthorizedOperation\") || ($.errorCode=\"AccessDenied*\")}"
       namespace = "CISBenchmark"
-      metric    = "UnauthorizedAPICalls"
-    },
-    "RootAccountUsage" = {
-      pattern   = "{($.userIdentity.type=\"Root\") && ($.userIdentity.invokedBy NOT EXISTS) && ($.eventType!=\"AwsServiceEvent\")}"
-      namespace = "CISBenchmark"
-      metric    = "RootAccountUsage"
-    },
-    "IamPolicyChange" = {
-      pattern   = "{($.eventSource=\"iam.amazonaws.com\") && (($.eventName=\"PutUserPolicy\") || ($.eventName=\"DeleteUserPolicy\") || ($.eventName=\"AttachUserPolicy\"))}"
-      namespace = "CISBenchmark"
-      metric    = "IamPolicyChange"
     }
-    # Add additional metrics as needed
+
+    # [AWS CIS] 3.3 - Ensure a log metric filter and alarm exist for usage of 'root' account
+    RootAccountUsage = {
+      pattern   = "{($.userIdentity.type=\"Root\") && $.userIdentity.invokedBy NOT EXISTS && $.eventType !=\"AwsServiceEvent\"}"
+      namespace = "CISBenchmark"
+    }
+
+    # [AWS CIS] 3.4 - Ensure a log metric filter and alarm exist for IAM policy changes
+    IamPolicyChange = {
+      pattern   = "{($.eventSource=\"iam.amazonaws.com\") && (($.eventName=\"DeleteGroupPolicy\") || ($.eventName=\"DeleteRolePolicy\") || ($.eventName=\"DeleteUserPolicy\") || ($.eventName=\"PutGroupPolicy\") || ($.eventName=\"PutRolePolicy\") || ($.eventName=\"PutUserPolicy\") || ($.eventName=\"CreatePolicy\") || ($.eventName=\"DeletePolicy\") || ($.eventName=\"CreatePolicyVersion\") || ($.eventName=\"DeletePolicyVersion\") || ($.eventName=\"AttachRolePolicy\") || ($.eventName=\"DetachRolePolicy\") || ($.eventName=\"AttachUserPolicy\") || ($.eventName=\"DetachUserPolicy\") || ($.eventName=\"AttachGroupPolicy\") || ($.eventName=\"DetachGroupPolicy\"))}"
+      namespace = "CISBenchmark"
+    }
+
+    # [AWS CIS] 3.5 - Ensure a log metric filter and alarm exist for CloudTrail configuration changes
+    CloudTrailConfigChange = {
+      pattern   = "{($.eventName=\"CreateTrail\") || ($.eventName=\"UpdateTrail\") || ($.eventName=\"DeleteTrail\") || ($.eventName=\"StartLogging\") || ($.eventName=\"StopLogging\")}"
+      namespace = "CISBenchmark"
+    }
+
+    # [AWS CIS] 3.6 - Ensure a log metric filter and alarm exist for AWS Management Console authentication failures
+    SignInFailures = {
+      pattern   = "{($.eventName=\"ConsoleLogin\") && ($.errorMessage=\"Failed authentication\")}"
+      namespace = "CISBenchmark"
+    }
+
+    # [AWS CIS] 3.7 - Ensure a log metric filter and alarm exist for disabling or scheduled deletion of customer managed keys
+    CMKDisabledOrScheduledDeleted = {
+      pattern   = "{($.eventSource=\"kms.amazonaws.com\") && (($.eventName=\"DisableKey\") || ($.eventName=\"ScheduleKeyDeletion\"))}"
+      namespace = "CISBenchmark"
+    }
+
+    # [AWS CIS] 3.8 - Ensure a log metric filter and alarm exist for S3 bucket policy changes
+    S3BucketPolicyChange = {
+      pattern   = "{($.eventSource=\"s3.amazonaws.com\") && (($.eventName=\"PutBucketAcl\") || ($.eventName=\"PutBucketPolicy\") || ($.eventName=\"PutBucketCors\") || ($.eventName=\"PutBucketLifecycle\") || ($.eventName=\"PutBucketReplication\") || ($.eventName=\"DeleteBucketPolicy\") || ($.eventName=\"DeleteBucketCors\") || ($.eventName=\"DeleteBucketLifecycle\") || ($.eventName=\"DeleteBucketReplication\"))}"
+      namespace = "CISBenchmark"
+    }
+
+    # [AWS CIS] 3.9 - Ensure a log metric filter and alarm exist for AWS Config configuration changes
+    AwsConfigConfigurationChange = {
+      pattern   = "{($.eventSource=\"config.amazonaws.com\") && (($.eventName=\"StopConfigurationRecorder\") || ($.eventName=\"DeleteDeliveryChannel\") || ($.eventName=\"PutDeliveryChannel\") || ($.eventName=\"PutConfigurationRecorder\"))}"
+      namespace = "CISBenchmark"
+    }
+
+    # [AWS CIS] 3.10 - Ensure a log metric filter and alarm exist for security group changes
+    SecurityGroupChanges = {
+      pattern   = "{($.eventName=\"AuthorizeSecurityGroupIngress\") || ($.eventName=\"AuthorizeSecurityGroupEgress\") || ($.eventName=\"RevokeSecurityGroupIngress\") || ($.eventName=\"RevokeSecurityGroupEgress\") || ($.eventName=\"CreateSecurityGroup\") || ($.eventName=\"DeleteSecurityGroup\")}"
+      namespace = "CISBenchmark"
+    }
+
+    # [AWS CIS] 3.11 - Ensure a log metric filter and alarm exist for changes to Network Access Control Lists (NACL)
+    NACLChanges = {
+      pattern   = "{($.eventName=\"CreateNetworkAcl\") || ($.eventName=\"CreateNetworkAclEntry\") || ($.eventName=\"DeleteNetworkAcl\") || ($.eventName=\"DeleteNetworkAclEntry\") || ($.eventName=\"ReplaceNetworkAclEntry\") || ($.eventName=\"ReplaceNetworkAclAssociation\")}"
+      namespace = "CISBenchmark"
+    }
+
+    # [AWS CIS] 3.12 - Ensure a log metric filter and alarm exist for changes to network gateways (Automated)
+    NetworkGatewayChange = {
+      pattern   = "{($.eventName=\"CreateCustomerGateway\") || ($.eventName=\"DeleteCustomerGateway\") || ($.eventName=\"AttachInternetGateway\") || ($.eventName=\"CreateInternetGateway\") || ($.eventName=\"DeleteInternetGateway\") || ($.eventName=\"DetachInternetGateway\")}"
+      namespace = "CISBenchmark"
+    }
+
+    # [AWS CIS] 3.13 Ensure a log metric filter and alarm exist for route table changes
+    RouteTableChange = {
+      pattern   = "{($.eventSource=\"ec2.amazonaws.com\") && (($.eventName=\"CreateRoute\") || ($.eventName=\"CreateRouteTable\") || ($.eventName=\"ReplaceRoute\") || ($.eventName=\"ReplaceRouteTableAssociation\") || ($.eventName=\"DeleteRouteTable\") || ($.eventName=\"DeleteRoute\") || ($.eventName=\"DisassociateRouteTable\"))}"
+      namespace = "CISBenchmark"
+    }
+
+    # [AWS CIS] 3.14 Ensure a log metric filter and alarm exist for VPC changes
+    VpcChange = {
+      pattern   = "{($.eventName=\"CreateVpc\") || ($.eventName=\"DeleteVpc\") || ($.eventName=\"ModifyVpcAttribute\") || ($.eventName=\"AcceptVpcPeeringConnection\") || ($.eventName=\"CreateVpcPeeringConnection\") || ($.eventName=\"DeleteVpcPeeringConnection\") || ($.eventName=\"RejectVpcPeeringConnection\") || ($.eventName=\"AttachClassicLinkVpc\") || ($.eventName=\"DetachClassicLinkVpc\") || ($.eventName=\"DisableVpcClassicLink\") || ($.eventName=\"EnableVpcClassicLink\")}"
+      namespace = "CISBenchmark"
+    }
   }
 }
+
 
 # Metric Filters and Alarms Creation
 resource "aws_cloudwatch_metric_filter" "cis_benchmark_filters" {
