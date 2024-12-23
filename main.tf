@@ -12,6 +12,12 @@ variable "region" {
   description = "AWS region for deploying resources"
 }
 
+variable "metric_period" {
+  description = "The period in seconds over which the metrics should be evaluated"
+  type        = number
+  default     = 300
+}
+
 variable env {
   type        = string
   default     = "stag"
@@ -87,124 +93,134 @@ resource "aws_sns_topic_subscription" "security_alerts_email" {
 # Metric Filters Configuration
 locals {
   metric_filters = {
-    # Unauthorized API Calls Detection
+    # [AWS CIS] 3.1 - Unauthorized API Calls
     UnauthorizedAPICalls = {
-      pattern      = "{($.errorCode = \"*UnauthorizedOperation\") || ($.errorCode = \"AccessDenied*\") || ($.sourceIPAddress!=\"AWS Internal\")}"
-      namespace    = "SecurityMonitoring"
+      pattern      = "{($.errorCode=\"*UnauthorizedOperation\") || ($.errorCode=\"AccessDenied*\")}"
+      namespace    = "CISBenchmark"
       metric_name  = "UnauthorizedAPICalls"
-      description  = "Detects unauthorized API calls and access denied errors"
+      description  = "Unauthorized API calls"
       threshold    = 1
-      period      = 300
+      period      = var.metric_period
     }
 
-    # Root Account Usage Monitoring
+    # [AWS CIS] 3.3 - Root Account Usage
     RootAccountUsage = {
-      pattern      = "{($.userIdentity.type = \"Root\") && ($.userIdentity.invokedBy NOT EXISTS) && ($.eventType != \"AwsServiceEvent\")}"
-      namespace    = "SecurityMonitoring"
+      pattern      = "{$.userIdentity.type=\"Root\" && $.userIdentity.invokedBy NOT EXISTS && $.eventType !=\"AwsServiceEvent\"}"
+      namespace    = "CISBenchmark"
       metric_name  = "RootAccountUsage"
-      description  = "Monitors usage of root account credentials"
+      description  = "Usage of root account"
       threshold    = 1
-      period      = 300
+      period      = var.metric_period
     }
 
-    # IAM Policy Changes
-    IAMPolicyChanges = {
-      pattern      = "{($.eventName = CreatePolicy) || ($.eventName = DeletePolicy) || ($.eventName = CreatePolicyVersion) || ($.eventName = DeletePolicyVersion) || ($.eventName = AttachRolePolicy) || ($.eventName = DetachRolePolicy) || ($.eventName = AttachUserPolicy) || ($.eventName = DetachUserPolicy)}"
-      namespace    = "SecurityMonitoring"
-      metric_name  = "IAMPolicyChanges"
-      description  = "Tracks changes to IAM policies, including creation, deletion, and attachment"
+    # [AWS CIS] 3.4 - IAM Policy Changes
+    IamPolicyChange = {
+      pattern      = "{($.eventSource=iam.amazonaws.com) && (($.eventName=DeleteGroupPolicy) || ($.eventName=DeleteRolePolicy) || ($.eventName=DeleteUserPolicy) || ($.eventName=PutGroupPolicy) || ($.eventName=PutRolePolicy) || ($.eventName=PutUserPolicy) || ($.eventName=CreatePolicy) || ($.eventName=DeletePolicy) || ($.eventName=CreatePolicyVersion) || ($.eventName=DeletePolicyVersion) || ($.eventName=AttachRolePolicy) || ($.eventName=DetachRolePolicy) || ($.eventName=AttachUserPolicy) || ($.eventName=DetachUserPolicy) || ($.eventName=AttachGroupPolicy) || ($.eventName=DetachGroupPolicy))}"
+      namespace    = "CISBenchmark"
+      metric_name  = "IamPolicyChange"
+      description  = "Changes to IAM policies"
       threshold    = 1
-      period      = 300
+      period      = var.metric_period
     }
 
-    # CloudTrail Changes
-    CloudTrailChanges = {
-      pattern      = "{($.eventName = CreateTrail) || ($.eventName = UpdateTrail) || ($.eventName = DeleteTrail) || ($.eventName = StartLogging) || ($.eventName = StopLogging)}"
-      namespace    = "SecurityMonitoring"
-      metric_name  = "CloudTrailChanges"
-      description  = "Monitors changes to CloudTrail configuration"
+    # [AWS CIS] 3.5 - CloudTrail Configuration Changes
+    CloudTrailConfigChange = {
+      pattern      = "{($.eventName=CreateTrail) || ($.eventName=UpdateTrail) || ($.eventName=DeleteTrail) || ($.eventName=StartLogging) || ($.eventName=StopLogging)}"
+      namespace    = "CISBenchmark"
+      metric_name  = "CloudTrailConfigChange"
+      description  = "Changes to CloudTrail configuration"
       threshold    = 1
-      period      = 300
+      period      = var.metric_period
     }
 
-    # Console Sign-in Failures
-    ConsoleSignInFailures = {
-      pattern      = "{($.eventName = ConsoleLogin) && ($.errorMessage = \"Failed authentication\")}"
-      namespace    = "SecurityMonitoring"
-      metric_name  = "ConsoleSignInFailures"
-      description  = "Tracks failed console login attempts"
-      threshold    = 3  # Adjusted for potential legitimate failures
-      period      = 300
-    }
-
-    # Network Access Control List Changes
-    NACLChanges = {
-      pattern      = "{($.eventName = CreateNetworkAcl) || ($.eventName = CreateNetworkAclEntry) || ($.eventName = DeleteNetworkAcl) || ($.eventName = DeleteNetworkAclEntry) || ($.eventName = ReplaceNetworkAclEntry) || ($.eventName = ReplaceNetworkAclAssociation)}"
-      namespace    = "SecurityMonitoring"
-      metric_name  = "NACLChanges"
-      description  = "Detects changes to Network ACLs"
+    # [AWS CIS] 3.6 - Console Authentication Failures
+    SignInFailures = {
+      pattern      = "{($.eventName=ConsoleLogin) && ($.errorMessage=\"Failed authentication\")}"
+      namespace    = "CISBenchmark"
+      metric_name  = "SignInFailures"
+      description  = "AWS Console authentication failures"
       threshold    = 1
-      period      = 300
+      period      = var.metric_period
     }
 
-    # Security Group Changes
+    # [AWS CIS] 3.7 - Disabled or Scheduled Deletion of CMKs
+    CMKDisabledOrScheduledDeleted = {
+      pattern      = "{($.eventSource=kms.amazonaws.com) && (($.eventName=DisableKey) || ($.eventName=ScheduleKeyDeletion))}"
+      namespace    = "CISBenchmark"
+      metric_name  = "CMKDisabledOrScheduledDeleted"
+      description  = "Customer managed keys disabled or scheduled for deletion"
+      threshold    = 1
+      period      = var.metric_period
+    }
+
+    # [AWS CIS] 3.8 - S3 Bucket Policy Changes
+    S3BucketPolicyChange = {
+      pattern      = "{($.eventSource=s3.amazonaws.com) && (($.eventName=PutBucketAcl) || ($.eventName=PutBucketPolicy) || ($.eventName=PutBucketCors) || ($.eventName=PutBucketLifecycle) || ($.eventName=PutBucketReplication) || ($.eventName=DeleteBucketPolicy) || ($.eventName=DeleteBucketCors) || ($.eventName=DeleteBucketLifecycle) || ($.eventName=DeleteBucketReplication))}"
+      namespace    = "CISBenchmark"
+      metric_name  = "S3BucketPolicyChange"
+      description  = "Changes to S3 bucket policies"
+      threshold    = 1
+      period      = var.metric_period
+    }
+
+    # [AWS CIS] 3.9 - AWS Config Configuration Changes
+    AwsConfigConfigurationChange = {
+      pattern      = "{($.eventSource=config.amazonaws.com) && (($.eventName=StopConfigurationRecorder) || ($.eventName=DeleteDeliveryChannel) || ($.eventName=PutDeliveryChannel) || ($.eventName=PutConfigurationRecorder))}"
+      namespace    = "CISBenchmark"
+      metric_name  = "AwsConfigConfigurationChange"
+      description  = "Changes to AWS Config configuration"
+      threshold    = 1
+      period      = var.metric_period
+    }
+
+    # [AWS CIS] 3.10 - Security Group Changes
     SecurityGroupChanges = {
-      pattern      = "{($.eventName = AuthorizeSecurityGroupIngress) || ($.eventName = RevokeSecurityGroupIngress) || ($.eventName = AuthorizeSecurityGroupEgress) || ($.eventName = RevokeSecurityGroupEgress) || ($.eventName = CreateSecurityGroup) || ($.eventName = DeleteSecurityGroup)}"
-      namespace    = "SecurityMonitoring"
+      pattern      = "{($.eventName=AuthorizeSecurityGroupIngress) || ($.eventName=AuthorizeSecurityGroupEgress) || ($.eventName=RevokeSecurityGroupIngress) || ($.eventName=RevokeSecurityGroupEgress) || ($.eventName=CreateSecurityGroup) || ($.eventName=DeleteSecurityGroup)}"
+      namespace    = "CISBenchmark"
       metric_name  = "SecurityGroupChanges"
-      description  = "Monitors changes to Security Groups"
+      description  = "Changes to security groups"
       threshold    = 1
-      period      = 300
+      period      = var.metric_period
     }
 
-    # KMS Key Changes
-    KMSKeyChanges = {
-      pattern      = "{($.eventSource = kms.amazonaws.com) && (($.eventName = DisableKey) || ($.eventName = ScheduleKeyDeletion) || ($.eventName = DeleteAlias) || ($.eventName=ImportKeyMaterial))}"
-      namespace    = "SecurityMonitoring"
-      metric_name  = "KMSKeyChanges"
-      description  = "Tracks critical changes to KMS keys"
+    # [AWS CIS] 3.11 - NACL Changes
+    NACLChanges = {
+      pattern      = "{($.eventName=CreateNetworkAcl) || ($.eventName=CreateNetworkAclEntry) || ($.eventName=DeleteNetworkAcl) || ($.eventName=DeleteNetworkAclEntry) || ($.eventName=ReplaceNetworkAclEntry) || ($.eventName=ReplaceNetworkAclAssociation)}"
+      namespace    = "CISBenchmark"
+      metric_name  = "NACLChanges"
+      description  = "Changes to Network Access Control Lists"
       threshold    = 1
-      period      = 300
+      period      = var.metric_period
     }
 
-    # S3 Bucket Policy Changes
-    S3BucketPolicyChanges = {
-      pattern      = "{($.eventSource = s3.amazonaws.com) && (($.eventName = PutBucketAcl) || ($.eventName = PutBucketPolicy) || ($.eventName = PutBucketCors) || ($.eventName = PutBucketLifecycle) || ($.eventName = PutBucketReplication) || ($.eventName = DeleteBucketPolicy) || ($.eventName = DeleteBucketCors) || ($.eventName = DeleteBucketLifecycle) || ($.eventName = DeleteBucketReplication))}"
-      namespace    = "SecurityMonitoring"
-      metric_name  = "S3BucketPolicyChanges"
-      description  = "Monitors changes to S3 bucket policies and configurations"
+    # [AWS CIS] 3.12 - Network Gateway Changes
+    NetworkGatewayChange = {
+      pattern      = "{($.eventName=CreateCustomerGateway) || ($.eventName=DeleteCustomerGateway) || ($.eventName=AttachInternetGateway) || ($.eventName=CreateInternetGateway) || ($.eventName=DeleteInternetGateway) || ($.eventName=DetachInternetGateway)}"
+      namespace    = "CISBenchmark"
+      metric_name  = "NetworkGatewayChange"
+      description  = "Changes to network gateways"
       threshold    = 1
-      period      = 300
+      period      = var.metric_period
     }
 
-    # VPC Changes
-    VPCChanges = {
-      pattern      = "{($.eventName = CreateVpc) || ($.eventName = DeleteVpc) || ($.eventName = ModifyVpcAttribute) || ($.eventName = AcceptVpcPeeringConnection) || ($.eventName = CreateVpcPeeringConnection) || ($.eventName = DeleteVpcPeeringConnection) || ($.eventName = RejectVpcPeeringConnection) || ($.eventName = AttachClassicLinkVpc) || ($.eventName = DetachClassicLinkVpc) || ($.eventName = DisableVpcClassicLink) || ($.eventName = EnableVpcClassicLink)}"
-      namespace    = "SecurityMonitoring"
-      metric_name  = "VPCChanges"
-      description  = "Tracks changes to VPC configurations and peering connections"
+    # [AWS CIS] 3.13 - Route Table Changes
+    RouteTableChange = {
+      pattern      = "{($.eventSource=ec2.amazonaws.com) && (($.eventName=CreateRoute) || ($.eventName=CreateRouteTable) || ($.eventName=ReplaceRoute) || ($.eventName=ReplaceRouteTableAssociation) || ($.eventName=DeleteRouteTable) || ($.eventName=DeleteRoute) || ($.eventName=DisassociateRouteTable))}"
+      namespace    = "CISBenchmark"
+      metric_name  = "RouteTableChange"
+      description  = "Changes to route tables"
       threshold    = 1
-      period      = 300
+      period      = var.metric_period
     }
 
-    # Route Table Changes
-    RouteTableChanges = {
-      pattern      = "{($.eventName = CreateRoute) || ($.eventName = CreateRouteTable) || ($.eventName = ReplaceRoute) || ($.eventName = ReplaceRouteTableAssociation) || ($.eventName = DeleteRouteTable) || ($.eventName = DeleteRoute) || ($.eventName = DisassociateRouteTable)}"
-      namespace    = "SecurityMonitoring"
-      metric_name  = "RouteTableChanges"
-      description  = "Monitors changes to route tables"
+    # [AWS CIS] 3.14 - VPC Changes
+    VpcChange = {
+      pattern      = "{($.eventName=CreateVpc) || ($.eventName=DeleteVpc) || ($.eventName=ModifyVpcAttribute) || ($.eventName=AcceptVpcPeeringConnection) || ($.eventName=CreateVpcPeeringConnection) || ($.eventName=DeleteVpcPeeringConnection) || ($.eventName=RejectVpcPeeringConnection) || ($.eventName=AttachClassicLinkVpc) || ($.eventName=DetachClassicLinkVpc) || ($.eventName=DisableVpcClassicLink) || ($.eventName=EnableVpcClassicLink)}"
+      namespace    = "CISBenchmark"
+      metric_name  = "VpcChange"
+      description  = "Changes to VPC configuration"
       threshold    = 1
-      period      = 300
-    }
-
-    # Network Gateway Changes
-    NetworkGatewayChanges = {
-      pattern      = "{($.eventName = CreateCustomerGateway) || ($.eventName = DeleteCustomerGateway) || ($.eventName = AttachInternetGateway) || ($.eventName = CreateInternetGateway) || ($.eventName = DeleteInternetGateway) || ($.eventName = DetachInternetGateway)}"
-      namespace    = "SecurityMonitoring"
-      metric_name  = "NetworkGatewayChanges"
-      description  = "Detects changes to network gateways"
-      threshold    = 1
-      period      = 300
+      period      = var.metric_period
     }
   }
 }
