@@ -9,12 +9,12 @@ variable "region" {
 
 variable "cloudtrail" {
   type    = string
-  default = "cis-benchmark-trail"
+  default = "codepipeline-source-trail"
 }
 
 variable "cloudwatch" {
   type    = string
-  default = "/aws/cloudtrail/cis-benchmark"
+  default = "codepipeline-source-trail"
 }
 
 variable "s3bucket" {
@@ -24,7 +24,7 @@ variable "s3bucket" {
 
 variable "iam_role" {
   type    = string
-  default = "cis-benchmark-role"
+  default = "codepipeline-source-trail"
 }
 
 # SNS Topic for CIS Benchmark Alarms
