@@ -1,30 +1,30 @@
 provider "aws" {
-  region = var.region # Change to your preferred region
+  region = var.region
 }
 
-variable region {
+variable "region" {
   type    = string
-  default ="ap-southeast-1"
+  default = "ap-southeast-1"
 }
 
-variable cloudtrail {
+variable "cloudtrail" {
   type    = string
-  default ="ap-southeast-1"
+  default = "cis-benchmark-trail"
 }
 
-variable cloudwatch {
+variable "cloudwatch" {
   type    = string
   default = "/aws/cloudtrail/cis-benchmark"
 }
 
-variable s3bucket {
+variable "s3bucket" {
   type    = string
-  default ="ap-southeast-1"
+  default = "cis-benchmark-trail-bucket"
 }
 
-variable iam_role {
+variable "iam_role" {
   type    = string
-  default ="ap-southeast-1"
+  default = "cis-benchmark-role"
 }
 
 # SNS Topic for CIS Benchmark Alarms
@@ -40,7 +40,7 @@ resource "aws_sns_topic_subscription" "email_subscription" {
 
 # Data sources to check for existing resources
 data "aws_cloudtrail" "existing_cloudtrail" {
-  name = "cis-benchmark-trail"
+  name = var.cloudtrail
 }
 
 data "aws_cloudwatch_log_group" "existing_log_group" {
@@ -57,9 +57,9 @@ data "aws_iam_role" "existing_iam_role" {
 
 # CloudTrail
 resource "aws_cloudtrail" "cis_benchmark_trail" {
-  count = length(data.aws_cloudtrail.existing_cloudtrail) == 0 ? 1 : 0
+  count = length(data.aws_cloudtrail.existing_cloudtrail.id) == 0 ? 1 : 0
   
-  name                          = "cis-benchmark-trail"
+  name                          = var.cloudtrail
   is_multi_region_trail         = true
   enable_log_file_validation    = true
   cloud_watch_logs_group_arn    = aws_cloudwatch_log_group.cis_benchmark_log_group.arn
@@ -69,8 +69,8 @@ resource "aws_cloudtrail" "cis_benchmark_trail" {
 }
 
 resource "aws_s3_bucket" "cis_benchmark_bucket" {
-  count  = length(data.aws_s3_bucket.existing_s3_bucket) == 0 ? 1 : 0
-  bucket = "cis-benchmark-trail-bucket-${random_id.bucket_suffix.hex}"
+  count  = length(data.aws_s3_bucket.existing_s3_bucket.id) == 0 ? 1 : 0
+  bucket = "${var.s3bucket}-${random_id.bucket_suffix.hex}"
 
   versioning {
     enabled = true
@@ -96,9 +96,9 @@ resource "random_id" "bucket_suffix" {
 
 # IAM Role for CloudTrail to write logs to CloudWatch
 resource "aws_iam_role" "cis_benchmark_role" {
-  count = length(data.aws_iam_role.existing_iam_role) == 0 ? 1 : 0
+  count = length(data.aws_iam_role.existing_iam_role.id) == 0 ? 1 : 0
   
-  name = "cis-benchmark-role"
+  name = var.iam_role
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
@@ -135,8 +135,8 @@ resource "aws_iam_role_policy_attachment" "attach_policy" {
 }
 
 resource "aws_cloudwatch_log_group" "cis_benchmark_log_group" {
-  count = length(data.aws_cloudwatch_log_group.existing_log_group) == 0 ? 1 : 0
-  name  = "/aws/cloudtrail/cis-benchmark"
+  count = length(data.aws_cloudwatch_log_group.existing_log_group.id) == 0 ? 1 : 0
+  name  = var.cloudwatch
 }
 
 # CloudWatch Metric Filters and Alarms
