@@ -12,6 +12,16 @@ variable "region" {
   description = "AWS region for deploying resources"
 }
 
+variable env {
+  type        = string
+  default     = "stag"
+}
+
+variable cloudscape_id {
+  type        = string
+  default     = "AWS-1169"
+}
+
 variable "cloudwatch_log_group" {
   type        = string
   default     = "codepipeline-source-trail"
@@ -33,8 +43,8 @@ resource "aws_sns_topic" "security_alerts" {
   kms_master_key_id = aws_kms_key.sns_encryption.id  # Enable encryption
   
   tags = {
-    Environment = "Production"
-    Purpose     = "Security Monitoring"
+    Environment = "${var.env}"
+    Purpose     = "${var.cloudscape_id}"
   }
 }
 
@@ -235,7 +245,7 @@ resource "aws_cloudwatch_metric_alarm" "security_alarms" {
   alarm_actions = [aws_sns_topic.security_alerts.arn]
   
   tags = {
-    Environment = "Production"
-    Purpose     = "Security Monitoring"
+    Environment = "${var.env}"
+    Purpose     = "${var.cloudscape_id}"
   }
 }
