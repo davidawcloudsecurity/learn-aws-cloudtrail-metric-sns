@@ -74,11 +74,6 @@ resource "aws_sns_topic_subscription" "security_alerts_email" {
   endpoint  = var.sns_email
 }
 
-# Reference existing CloudWatch Log Group
-data "aws_cloudwatch_log_group" "cloudtrail_logs" {
-  name = var.cloudwatch_log_group
-}
-
 # Metric Filters Configuration
 locals {
   metric_filters = {
@@ -203,8 +198,13 @@ locals {
     }
   }
 }
-# Create Metric Filters
-resource "aws_cloudwatch_metric_filter" "security_filters" {
+
+data "aws_cloudwatch_log_group" "cloudtrail_logs" {
+  name = var.cloudwatch_log_group
+}
+
+# Create Log Metric Filters
+resource "aws_cloudwatch_log_metric_filter" "security_filters" {
   for_each       = local.metric_filters
   name           = "${each.key}Filter"
   pattern        = each.value.pattern
@@ -218,8 +218,8 @@ resource "aws_cloudwatch_metric_filter" "security_filters" {
   }
 }
 
-# Create CloudWatch Alarms
-resource "aws_cloudwatch_alarm" "security_alarms" {
+# Create CloudWatch Metric Alarms
+resource "aws_cloudwatch_metric_alarm" "security_alarms" {
   for_each            = local.metric_filters
   alarm_name          = "${each.key}Alarm"
   alarm_description   = each.value.description
