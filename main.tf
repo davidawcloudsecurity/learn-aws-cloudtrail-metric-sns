@@ -1,16 +1,6 @@
 # AWS Security Monitoring Configuration
 # Implements CIS Benchmark alerts for critical security events
 
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 4.0"  # Specify provider version for better version control
-    }
-  }
-  required_version = ">= 1.0.0"  # Specify minimum Terraform version
-}
-
 provider "aws" {
   region = var.region
 }
